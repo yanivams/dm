@@ -1,47 +1,48 @@
 /*
- * Copyright 2016 Dario Manesku. All rights reserved.
+ * Copyright 2015 Dario Manesku. All rights reserved.
  * License: http://www.opensource.org/licenses/BSD-2-Clause
  */
 
-#include "../dm.h"
+#ifndef DM_DATASTRUCTURES_COMMON_H_HEADER_GUARD
+#define DM_DATASTRUCTURES_COMMON_H_HEADER_GUARD
 
-/// Header includes.
-#if (DM_INCL & DM_INCL_HEADER_INCLUDES)
-    #include "../allocatori.h"
-#endif // (DM_INCL & DM_INCL_HEADER_INCLUDES)
+#include <stdint.h>
+#include "../common/common.h"               // DM_INLINE
+#include "../../../3rdparty/bx/allocator.h" // bx::AllocatorI
 
-/// Header body.
-#if (DM_INCL & DM_INCL_HEADER_BODY)
-#   if (DM_INCL & DM_INCL_HEADER_BODY_OPT_REMOVE_HEADER_GUARD)
-#       undef DM_DATASTRUCTURES_COMMON_H_HEADER_GUARD
-#   endif // if (DM_INCL & DM_INCL_HEADER_BODY_OPT_REMOVE_HEADER_GUARD)
-#   ifndef DM_DATASTRUCTURES_COMMON_H_HEADER_GUARD
-#   define DM_DATASTRUCTURES_COMMON_H_HEADER_GUARD
-namespace DM_NAMESPACE
+namespace dm
 {
-    extern CrtAllocator g_crtAllocator;
+    /// Heap alloc utils for dm data structures.
+    ///
+    /// Usage:
+    ///     typedef dm::Array<int> IntArray;
+    ///     IntArray* intArray = dm::create<IntArray>(64, &allocator);
+    ///     /*...*/
+    ///     dm::destroy(intArray);
+    ///
 
-    template <typename DataStructureH>
-    DM_INLINE DataStructureH* create(uint32_t _max, AllocatorI* _allocator = &g_crtAllocator)
+    template <typename Ty>
+    DM_INLINE Ty* create(uint32_t _max, void* _mem, bx::AllocatorI* _memDeallocator)
     {
-        uint8_t* ptr = (uint8_t*)DM_ALLOC(sizeof(DataStructureH) + DataStructureH::sizeFor(_max), _allocator);
-
-        DataStructureH* dsb = ::new (ptr) DataStructureH();
-        dsb->init(_max, ptr + sizeof(DataStructureH));
-        dsb->m_allocator = _allocator;
-
-        return dsb;
+        return ::new (_mem) Ty(_max, (uint8_t*)_mem + sizeof(Ty), _memDeallocator);
     }
 
-    template <typename DataStructureH>
-    DM_INLINE void destroy(DataStructureH* _dsb)
+    template <typename Ty>
+    DM_INLINE Ty* create(uint32_t _max, bx::AllocatorI* _allocator)
     {
-        AllocatorI* allocator = _dsb->m_allocator;
-        _dsb->~DataStructureH();
-        DM_FREE(_allocator, _dsb);
+        uint8_t* ptr = (uint8_t*)BX_ALLOC(_allocator, sizeof(Ty) + Ty::sizeFor(_max));
+        return create<Ty>(_max, ptr, _allocator);
     }
-} // namespace DM_NAMESPACE
-#   endif // DM_DATASTRUCTURES_COMMON_H_HEADER_GUARD
-#endif // (DM_INCL & DM_INCL_HEADER_BODY)
+
+    template <typename Ty>
+    DM_INLINE void destroy(Ty* _dataStructure)
+    {
+        _dataStructure->~Ty();
+        BX_FREE(_dataStructure->allocator(), _dataStructure);
+    }
+
+} // namespace dm
+
+#endif // DM_DATASTRUCTURES_COMMON_H_HEADER_GUARD
 
 /* vim: set sw=4 ts=4 expandtab: */

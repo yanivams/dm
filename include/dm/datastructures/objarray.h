@@ -3,8 +3,8 @@
  * License: http://www.opensource.org/licenses/BSD-2-Clause
  */
 
-#ifndef DM_ARRAY_H_HEADER_GUARD
-#define DM_ARRAY_H_HEADER_GUARD
+#ifndef DM_OBJARRAY_H_HEADER_GUARD
+#define DM_OBJARRAY_H_HEADER_GUARD
 
 #include <stdint.h> // uint32_t
 #include <new>      // placement-new
@@ -19,14 +19,14 @@
 namespace dm
 {
     template <typename Ty, uint32_t MaxT>
-    struct ArrayT
+    struct ObjArrayT
     {
-        ArrayT()
+        ObjArrayT()
         {
             m_count = 0;
         }
 
-        #include "array_inline_impl.h"
+        #include "objarray_inline_impl.h"
 
         uint32_t count() const
         {
@@ -44,25 +44,25 @@ namespace dm
     };
 
     template <typename Ty>
-    struct Array
+    struct ObjArray
     {
         // Uninitialized state, init() needs to be called !
-        Array()
+        ObjArray()
         {
             m_values = NULL;
         }
 
-        Array(uint32_t _max, bx::ReallocatorI* _reallocator)
+        ObjArray(uint32_t _max, bx::ReallocatorI* _reallocator)
         {
             init(_max, _reallocator);
         }
 
-        Array(uint32_t _max, void* _mem, bx::AllocatorI* _allocator)
+        ObjArray(uint32_t _max, void* _mem, bx::AllocatorI* _allocator)
         {
             init(_max, _mem, _allocator);
         }
 
-        ~Array()
+        ~ObjArray()
         {
             destroy();
         }
@@ -105,6 +105,7 @@ namespace dm
             return (NULL != m_values);
         }
 
+        //TODO: get rid of this or reimplement !
         void reinit(uint32_t _max, bx::ReallocatorI* _reallocator)
         {
             if (isInitialized())
@@ -127,7 +128,7 @@ namespace dm
         }
 
         #define DM_DYNAMIC_ARRAY
-        #include "array_inline_impl.h"
+        #include "objarray_inline_impl.h"
 
         uint32_t count() const
         {
@@ -158,6 +159,6 @@ namespace dm
 
 } // namespace dm
 
-#endif // DM_ARRAY_H_HEADER_GUARD
+#endif // DM_OBJARRAY_H_HEADER_GUARD
 
 /* vim: set sw=4 ts=4 expandtab: */

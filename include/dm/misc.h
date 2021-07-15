@@ -1,106 +1,52 @@
 /*
- * Copyright 2014-2016 Dario Manesku. All rights reserved.
+ * Copyright 2014-2015 Dario Manesku. All rights reserved.
  * License: http://www.opensource.org/licenses/BSD-2-Clause
  */
 
-#include "dm.h"
+#ifndef DM_MISC_H_HEADER_GUARD
+#define DM_MISC_H_HEADER_GUARD
 
-/// Header includes.
-#if (DM_INCL & DM_INCL_HEADER_INCLUDES)
-#   include <stdint.h>  // uint32_t
-#   include <stddef.h>  // offsetof()
-#   include <stdlib.h>  // _fullpath
-#   include <stdarg.h>  // va_arg
-#   include <ctype.h>   // toupper()
-#   include <math.h>    // logf()
-#   include <stdio.h>   // FILE, fopen()
-#   include <float.h>   // FLT_EPSILON
-#   include <malloc.h>  // alloca()
+#include <stdint.h>
+#include <stdlib.h>  // _fullpath
+#include <ctype.h>   // toupper()
+#include <math.h>    // logf()
+#include <stdio.h>   // FILE, fopen()
+#include <float.h>   // FLT_EPSILON
+#include <malloc.h>  // alloca()
 
-#   include "dm.h"       // DM_INLINE()
-#   include "check.h"    // DM_CHECK()
-#   include "bitops.h"   // cntlz_u32(), cntlz_u64()
-#   include "platform.h" // DM_COMPILER_MSVC
-#   include "os.h"       // pwd()
+#include "common/common.h" // DM_INLINE()
+#include "check.h"         // DM_CHECK()
 
-#   if DM_PLATFORM_LINUX
-#      ifndef DM_REALPATH_H_INCLUDE_HEADER_GUARD
-#      define DM_REALPATH_H_INCLUDE_HEADER_GUARD
-#          include "../../3rdparty/realpath/realpath.h"
-#      endif // DM_REALPATH_H_INCLUDE_HEADER_GUARD
-#   endif // DM_PLATFORM_LINUX
-#endif // (DM_INCL & DM_INCL_HEADER_INCLUDES)
+#include "../../3rdparty/bx/os.h"       // bx::pwd()
+#include "../../3rdparty/bx/string.h"   // bx::snprintf()
+#include "../../3rdparty/bx/platform.h" // BX_COMPILER_MSVC_COMPATIBLE
+#include "../../3rdparty/bx/uint32_t.h" // bx::uint32_cntlz(), bx::uint64_cntlz()
 
-/// Header body.
-#if (DM_INCL & DM_INCL_HEADER_BODY)
-#   if (DM_INCL & DM_INCL_HEADER_BODY_OPT_REMOVE_HEADER_GUARD)
-#       undef DM_MISC_H_HEADER_GUARD
-#   endif // if (DM_INCL & DM_INCL_HEADER_BODY_OPT_REMOVE_HEADER_GUARD)
-#   ifndef DM_MISC_H_HEADER_GUARD
-#   define DM_MISC_H_HEADER_GUARD
-namespace DM_NAMESPACE
+#if BX_PLATFORM_LINUX
+#   include "../../3rdparty/realpath/realpath.h"
+#endif // BX_PLATFORM_LINUX
+
+namespace dm
 {
+    // Macro flags.
+    //-----
+
+    #ifndef DM_CPP11
+    #   define DM_CPP11 (__cplusplus >= 201103L)
+    #endif
+
     // Macro helpers.
     //-----
 
-    #define DM_COUNTOF(_arr) ((int)(sizeof(_arr)/sizeof(*_arr)))
     #define DM_OFFSETOF(type, member) ((size_t)&(((type*)0)->member))
-    #define DM_MASK(_idx) (1UL << _idx)
-
-    #define DM_STRINGIZE(_x) DM_STRINGIZE_(_x)
-    #define DM_STRINGIZE_(_x) #_x
-
-    #define DM_CONCATENATE(_x, _y) DM_CONCATENATE_(_x, _y)
-    #define DM_CONCATENATE_(_x, _y) _x ## _y
-
-    #define DM_FILE_LINE "" __FILE__ "(" DM_STRINGIZE(__LINE__) ")"
-
-    #define DM_UNUSED(_expr) for (;;) { (void)(true ? (void)0 : ((void)(_expr))); break; }
-
-    #if DM_COMPILER_GCC || DM_COMPILER_CLANG
-    #   define DM_ATTRIBUTE(_x) __attribute__((_x))
-    #   define DM_ALIGN_DECL(_align, _decl) _decl __attribute__((aligned(_align)))
-    #elif DM_COMPILER_MSVC
-    #   define DM_ALIGN_DECL(_align, _decl) __declspec(align(_align)) _decl
-    #   define DM_ATTRIBUTE(_x)
-    #endif // DM_COMPILER_*
-
-    #define DM_STATIC_ASSERT(_expr) typedef int DM_CONCATENATE(dm_compile_time_assert_, __LINE__)[1 - 2*!(_expr)] DM_ATTRIBUTE(unused)
-
-    #define DM_UNUSED(_expr) for (;;) { (void)(true ? (void)0 : ((void)(_expr))); break; }
-
-    #define DM_MAKEFOURCC(_a, _b, _c, _d) ( ((uint32_t(_a)&0xff)        \
-                                          | ((uint32_t(_b)&0xff) <<  8) \
-                                          | ((uint32_t(_c)&0xff) << 16) \
-                                          | ((uint32_t(_d)&0xff) << 24) )
-
-    // Other macros.
-    //-----
-
-    #if defined(__GNUC__) && __GNUC__ >= 4
-    #   define DM_LIKELY(x)   (__builtin_expect((x), 1))
-    #   define DM_UNLIKELY(x) (__builtin_expect((x), 0))
-    #else
-    #   define DM_LIKELY(x) (x)
-    #   define DM_UNLIKELY(x) (x)
-    #endif
+    #define DM_STATIC_ASSERT(_expr) { typedef int dm_compile_time_assert[1 - 2*!(_expr)]; }
 
     // Value.
     //-----
 
-    #ifdef max
-    #   undef max
-    #endif // max
-
-    #ifdef min
-    #   undef min
-    #endif // max
-
     #define DM_MIN(_a, _b) ((_a)<(_b)?(_a):(_b))
     #define DM_MAX(_a, _b) ((_a)>(_b)?(_a):(_b))
     #define DM_CLAMP(_val, _min, _max) (DM_MIN(DM_MAX(_val, _min), _max))
-    #define DM_TOGGLE(_flag) _flag = !_flag
-    #define DM_LAZY_ASSIGN(_field, _value) if (_field != _value) { _field = _value; }
 
     // Return type is typeof(_a).
     template <typename TyA, typename TyB> DM_INLINE TyA mina(TyA _a, TyB _b) { return  _a < _b ? _a : _b; }
@@ -125,7 +71,7 @@ namespace DM_NAMESPACE
     }
 
     template <typename Ty/*arithmetic type*/>
-    DM_INLINE void swap(Ty& _a, Ty& _b)
+    DM_INLINE void swap(Ty _a, Ty _b)
     {
         Ty c = _a;
         _a = _b;
@@ -153,15 +99,6 @@ namespace DM_NAMESPACE
         _flag = !_flag;
     }
 
-    template <typename Ty0/*arithmetic type*/, typename Ty1/*arithmetic type*/>
-    DM_INLINE void lazyAssign(Ty0& _field, Ty1 _value)
-    {
-        if (_field != _value)
-        {
-            _field = _value;
-        }
-    }
-
     // Integer.
     //-----
 
@@ -172,12 +109,12 @@ namespace DM_NAMESPACE
 
     DM_INLINE uint32_t log2floor(uint32_t _u32)
     {
-        return (31 - cntlz_u32(_u32));
+        return (31 - bx::uint32_cntlz(_u32));
     }
 
     DM_INLINE uint64_t log2floor(uint64_t _u64)
     {
-        return (63 - cntlz_u64(_u64));
+        return (63 - bx::uint64_cntlz(_u64));
     }
 
     DM_INLINE uint32_t log2ceil(uint32_t _u32)
@@ -204,7 +141,9 @@ namespace DM_NAMESPACE
         return log2floor(_u64);
     }
 
-    #define DM_IS_POW_TWO(_v) ((0!=(_v)) && (0==((_v)&((_v)-1))))
+    #ifndef DM_IS_POW_TWO
+    #   define DM_IS_POW_TWO(_v) ((0!=(_v)) && (0==((_v)&((_v)-1))))
+    #endif // DM_IS_POW_TWO
 
     DM_INLINE bool isPowTwo(uint32_t _v)
     {
@@ -212,69 +151,49 @@ namespace DM_NAMESPACE
     }
 
     /// Usage:
-    ///   270 -> 512 /* For a non-power-of-two input, returns expected value. */
+    ///   270 -> 256 /* For a non-power-of-two input, returns expected value. */
     ///   256 -> 256 /* For a power-of-two input, returns the same value. */
-    DM_INLINE uint32_t nextPowTwo(uint32_t _u32)
+    ///     0 ->   1 /* For 0 input, returns invalid value! */
+    DM_INLINE uint32_t prevPowTwo(uint32_t _u32)
     {
-    #if 0
-        /// 0 -> 1 /* For 0 input, returns 1. */
-        const uint32_t ceil = log2ceil(_u32);
-        return (UINT32_C(1) << ceil);
-    #else
-        /// 0 -> 0 /* For 0 input, returns 0. */
-        uint32_t val = _u32;
-        --val;
-        val |= val >>  1;
-        val |= val >>  2;
-        val |= val >>  4;
-        val |= val >>  8;
-        val |= val >> 16;
-        ++val;
-
-        return val;
-    #endif
+        const uint32_t floor = log2floor(_u32);
+        return (UINT32_C(1)<<floor);
     }
 
     /// Usage:
-    ///   270 -> 256 /* For a non-power-of-two input, returns expected value. */
+    ///   270 -> 512 /* For a non-power-of-two input, returns expected value. */
     ///   256 -> 256 /* For a power-of-two input, returns the same value. */
-    DM_INLINE uint32_t prevPowTwo(uint32_t _u32)
+    ///     0 ->   1 /* For 0 input, returns 1. */
+    DM_INLINE uint32_t nextPowTwo(uint32_t _u32)
     {
-    #if 0
-        /// 0 -> 1 /* For 0 input, returns invalid value! */
-        const uint32_t floor = log2floor(_u32);
-        return (UINT32_C(1) << floor);
-    #else
-        /// 0 -> 0 /* For 0 input, returns 0. */
-        const uint32_t next = nextPowTwo(_u32);
-        return (next >> UINT32_C(1));
-    #endif
+        const uint32_t ceil = log2ceil(_u32);
+        return (UINT32_C(1)<<ceil);
     }
 
     /// Example: for input 12780 (12.492KB) returns 12.
-    DM_INLINE unsigned int asKBInt(size_t _dataSize)
+    DM_INLINE uint32_t asKBInt(uint64_t _dataSize)
     {
-        return (unsigned int)(_dataSize>>10);
+        return uint32_t(_dataSize>>10);
     }
 
     /// Example: for input 12780 (12.492KB) returns 492.
-    DM_INLINE unsigned int asKBDec(size_t _dataSize)
+    DM_INLINE uint32_t asKBDec(uint64_t _dataSize)
     {
-        const size_t kb = asKBInt(_dataSize);
-        return (unsigned int)(_dataSize-(kb<<10));
+        const uint64_t kb = asKBInt(_dataSize);
+        return uint32_t(_dataSize-(kb<<10));
     }
 
     /// Example: for input 13450000 (12.846MB) returns 12.
-    DM_INLINE unsigned int asMBInt(size_t _dataSize)
+    DM_INLINE uint32_t asMBInt(uint64_t _dataSize)
     {
-        return (unsigned int)(_dataSize>>20);
+        return uint32_t(_dataSize>>20);
     }
 
     /// Example: for input 13450000 (12.846MB) returns 826.
-    DM_INLINE unsigned int asMBDec(size_t _dataSize)
+    DM_INLINE uint32_t asMBDec(uint64_t _dataSize)
     {
-        const size_t mb = asMBInt(_dataSize);
-        return (unsigned int)((_dataSize-(mb<<20))>>10);
+        const uint64_t mb = asMBInt(_dataSize);
+        return uint32_t((_dataSize-(mb<<20))>>10);
     }
 
     /// Used for formatted print. Example: printf("Size: %u.%uMB", U_UMB(size));
@@ -288,35 +207,16 @@ namespace DM_NAMESPACE
         return (0 != _v);
     }
 
-    DM_INLINE bool inside(int32_t _pointX, int32_t _pointY
-                        , int32_t _quadX, int32_t _quadY
-                        , int32_t _quadWidth, int32_t _quadHeight)
+    DM_INLINE bool inside(int32_t _px, int32_t _py, int32_t _minx, int32_t _miny, int32_t _width, int32_t _height)
     {
-        return (_pointX > _quadX)
-            && (_pointY > _quadY)
-            && (_pointX < (_quadX+_quadWidth))
-            && (_pointY < (_quadY+_quadHeight));
-    }
-
-    DM_INLINE bool insidef(float _pointX, float _pointY
-                         , float _quadX, float _quadY
-                         , float _quadWidth, float _quadHeight)
-    {
-        return (_pointX > _quadX)
-            && (_pointY > _quadY)
-            && (_pointX < (_quadX+_quadWidth))
-            && (_pointY < (_quadY+_quadHeight));
+        return (_px > _minx)
+            && (_py > _miny)
+            && (_px < (_minx+_width))
+            && (_py < (_miny+_height));
     }
 
     // Align.
     //-----
-
-    template <typename Ty>
-    DM_INLINE uint32_t alignOf()
-    {
-        struct Tmp { char _c; Ty _m; };
-        return DM_OFFSETOF(Tmp, _m);
-    }
 
     DM_INLINE uint32_t align(uint32_t _val, uint32_t _alignPwrTwo)
     {
@@ -383,7 +283,7 @@ namespace DM_NAMESPACE
 
     DM_INLINE bool equals(float _a, float _b, float _epsilon = FLT_EPSILON)
     {
-        return fabsf(_a - _b) <= _epsilon*max(1.0,max(_a, _b));
+        return fabsf(_a - _b) < _epsilon;
     }
 
     /// Example: for input 5.34f returns 5.0f.
@@ -439,30 +339,22 @@ namespace DM_NAMESPACE
     // String.
     //----
 
-    // Compile time strlen for rvalue string literals.
-    // Use as: ctstrlen("foo"); // returns 3.
-    template <uint32_t Len>
-    DM_INLINE uint32_t ctstrlen(const char (&/*_str*/)[Len])
-    {
-        return Len-1;
-    }
-
     DM_INLINE int32_t stricmp(const char* _a, const char* _b)
     {
-        #if DM_COMPILER_MSVC
+        #if BX_COMPILER_MSVC_COMPATIBLE
             return _stricmp(_a, _b);
         #else
             return strcasecmp(_a, _b);
-        #endif // DM_COMPILER_MSVC
+        #endif // BX_COMPILER_MSVC_COMPATIBLE
     }
 
     DM_INLINE int32_t strnicmp(const char* _a, const char* _b, size_t _count)
     {
-        #if DM_COMPILER_MSVC
+        #if BX_COMPILER_MSVC_COMPATIBLE
             return _strnicmp(_a, _b, _count);
         #else
             return strncasecmp(_a, _b, _count);
-        #endif // DM_COMPILER_MSVC
+        #endif // BX_COMPILER_MSVC_COMPATIBLE
     }
 
     DM_INLINE void strscpy(char* _dst, const char* _src, size_t _dstSize)
@@ -474,25 +366,17 @@ namespace DM_NAMESPACE
         }
     }
 
-    DM_INLINE size_t strmcpy(char* _dst, size_t _dstSize, const char* _src, size_t _len)
-    {
-        const size_t num = (_dstSize-1 < _len) ? _dstSize-1 : _len;
-        memcpy(_dst, _src, num);
-        _dst[num] = '\0';
-
-        return num;
-    }
-
     template <uint32_t DstSize>
     DM_INLINE void stracpy(char (&_dst)[DstSize], const char* _src)
     {
         strscpy(_dst, _src, DstSize);
     }
 
+    // TODO: remove! Use 'stracpy' instead.
     template <uint32_t DstSize>
-    DM_INLINE void strmacpy(char (&_dst)[DstSize], const char* _src, uint32_t _len)
+    DM_INLINE void strscpya(char (&_dst)[DstSize], const char* _src)
     {
-        strmcpy(_dst, DstSize, _src, _len);
+        strscpy(_dst, _src, DstSize);
     }
 
     DM_INLINE void strscat(char* _dst, const char* _src, size_t _dstSize)
@@ -510,38 +394,44 @@ namespace DM_NAMESPACE
     }
 
     template <uint32_t CharArraySize>
-    DM_INLINE int stracmp(char (&_a)[CharArraySize], const char* _b)
+    DM_INLINE int strcmpa(char (&_a)[CharArraySize], const char* _b)
     {
         return strncmp(_a, _b, CharArraySize);
     }
 
     template <uint32_t CharArraySize>
-    DM_INLINE int stracmp(const char* _a, char (&_b)[CharArraySize])
+    DM_INLINE int strcmpa(const char* _a, char (&_b)[CharArraySize])
     {
         return strncmp(_a, _b, CharArraySize);
     }
 
     template <uint32_t CharArraySize>
-    DM_INLINE int striacmp(char (&_a)[CharArraySize], const char* _b)
+    DM_INLINE int stricmpa(char (&_a)[CharArraySize], const char* _b)
     {
         return strnicmp(_a, _b, CharArraySize);
     }
 
     template <uint32_t CharArraySize>
-    DM_INLINE int striacmp(const char* _a, char (&_b)[CharArraySize])
+    DM_INLINE int stricmpa(const char* _a, char (&_b)[CharArraySize])
     {
         return strnicmp(_a, _b, CharArraySize);
     }
 
     DM_INLINE void strtolower(char* _out, char* _in)
     {
-        while (*_in) { *_out++ = (char)tolower(*_in++); }
+        while (*_in)
+        {
+            *_out++ = (char)tolower(*_in++);
+        }
         *_out = '\0';
     }
 
     DM_INLINE void strtoupper(char* _out, char* _in)
     {
-        while (*_in) { *_out++ = (char)toupper(*_in++); }
+        while (*_in)
+        {
+            *_out++ = (char)toupper(*_in++);
+        }
         *_out = '\0';
     }
 
@@ -559,25 +449,6 @@ namespace DM_NAMESPACE
         {
             *_str = (char)toupper(*_str);
         }
-    }
-
-    DM_INLINE int32_t vsnprintf(char* _str, size_t _count, const char* _format, va_list _argList)
-    {
-        #if DM_COMPILER_MSVC
-            int32_t len = ::vsnprintf_s(_str, _count, size_t(-1), _format, _argList);
-            return -1 == len ? ::_vscprintf(_format, _argList) : len;
-        #else
-            return ::vsnprintf(_str, _count, _format, _argList);
-        #endif // DM_COMPILER_MSVC
-    }
-
-    DM_INLINE int32_t snprintf(char* _str, size_t _count, const char* _format, ...)
-    {
-        va_list argList;
-        va_start(argList, _format);
-        int32_t len = vsnprintf(_str, _count, _format, argList);
-        va_end(argList);
-        return len;
     }
 
     /// Notice: do NOT use return value of this function for memory deallocation!
@@ -609,7 +480,7 @@ namespace DM_NAMESPACE
 
     #define DM_PATH_LEN 4096
 
-    #if DM_PLATFORM_WINDOWS
+    #if BX_PLATFORM_WINDOWS
     #   define DM_DIRSLASH "\\"
     #else // OSX and Linux.
     #   define DM_DIRSLASH "/"
@@ -619,11 +490,11 @@ namespace DM_NAMESPACE
     {
         for (char* ptr = _path; '\0' != *ptr; ++ptr)
         {
-            #if DM_PLATFORM_WINDOWS
+            #if BX_PLATFORM_WINDOWS
                 if ('/' == *ptr) { *ptr = '\\'; }
             #else // OSX and Linux.
                 if ('\\' == *ptr) { *ptr = '/'; }
-            #endif //DM_PLATFORM_WINDOWS
+            #endif //BX_PLATFORM_WINDOWS
         }
     }
 
@@ -662,10 +533,10 @@ namespace DM_NAMESPACE
         const char* fs       = strrchr(_filePath, '/');
         const char* basename = (bs > fs ? bs : fs);
 
-        #if DM_PLATFORM_WINDOWS
+        #if BX_PLATFORM_WINDOWS
             const char* colon = strrchr(_filePath, ':');
             basename = basename > colon ? basename : colon;
-        #endif //DM_PLATFORM_WINDOWS
+        #endif //BX_PLATFORM_WINDOWS
 
         if (NULL != basename)
         {
@@ -702,21 +573,21 @@ namespace DM_NAMESPACE
 
     DM_INLINE void realpath(char _abs[DM_PATH_LEN], const char _rel[DM_PATH_LEN])
     {
-        #if DM_PLATFORM_WINDOWS
+        #if BX_PLATFORM_WINDOWS
             _fullpath(_abs, _rel, DM_PATH_LEN);
-        #elif DM_PLATFORM_LINUX
+        #elif BX_PLATFORM_LINUX
             // Notice ::realpath() is broken on Linux.
             // Using a custom implementation instead.
             ex02_realpath(_rel, _abs);
         #else // OSX
             char* path = ::realpath(_rel, _abs);
-            DM_UNUSED(path);
-        #endif // DM_PLATFORM_WINDOWS
+            BX_UNUSED(path);
+        #endif // BX_PLATFORM_WINDOWS
     }
 
     DM_INLINE void homeDir(char _path[DM_PATH_LEN])
     {
-        #if DM_PLATFORM_WINDOWS
+        #if BX_PLATFORM_WINDOWS
             strscpy(_path, getenv("USERPROFILE"), DM_PATH_LEN);
         #else // OSX and Linux.
             strscpy(_path, getenv("HOME"), DM_PATH_LEN);
@@ -725,18 +596,18 @@ namespace DM_NAMESPACE
 
     DM_INLINE void desktopDir(char _path[DM_PATH_LEN])
     {
-        #if DM_PLATFORM_WINDOWS
-            snprintf(_path, DM_PATH_LEN, "%s" DM_DIRSLASH "Desktop", getenv("USERPROFILE"));
+        #if BX_PLATFORM_WINDOWS
+            bx::snprintf(_path, DM_PATH_LEN, "%s" DM_DIRSLASH "Desktop", getenv("USERPROFILE"));
         #else // OSX and Linux.
-            snprintf(_path, DM_PATH_LEN, "%s" DM_DIRSLASH "Desktop", getenv("HOME"));
+            bx::snprintf(_path, DM_PATH_LEN, "%s" DM_DIRSLASH "Desktop", getenv("HOME"));
         #endif
     }
 
     DM_INLINE void rootDir(char _path[DM_PATH_LEN])
     {
-        #if DM_PLATFORM_WINDOWS
+        #if BX_PLATFORM_WINDOWS
             char currentDir[DM_PATH_LEN];
-            pwd(currentDir, DM_PATH_LEN);
+            bx::pwd(currentDir, DM_PATH_LEN);
             strscpy(_path, currentDir, 4);
         #else // OSX and Linux.
             _path[0] = '/';
@@ -764,11 +635,11 @@ namespace DM_NAMESPACE
 
     DM_INLINE uint32_t windowsDrives()
     {
-    #if DM_PLATFORM_WINDOWS
+    #if BX_PLATFORM_WINDOWS
         return GetLogicalDrives();
     #else
         return 0;
-    #endif // DM_PLATFORM_WINDOWS
+    #endif // BX_PLATFORM_WINDOWS
     }
 
     DM_INLINE const char* fileExt(const char* _filePath)
@@ -854,8 +725,8 @@ namespace DM_NAMESPACE
         Ty& m_ptr;
     };
 
-} // namespace DM_NAMESPACE
-#   endif // DM_MISC_H_HEADER_GUARD
-#endif // (DM_INCL & DM_INCL_HEADER_BODY)
+} // namespace dm
+
+#endif // DM_MISC_H_HEADER_GUARD
 
 /* vim: set sw=4 ts=4 expandtab: */

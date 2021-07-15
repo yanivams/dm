@@ -3,76 +3,75 @@
  * License: http://www.opensource.org/licenses/BSD-2-Clause
  */
 
-#ifndef DM_LINKEDLIST_H_HEADER_GUARD
-#define DM_LINKEDLIST_H_HEADER_GUARD
+#ifndef DM_KVMAP_H_HEADER_GUARD
+#define DM_KVMAP_H_HEADER_GUARD
 
 #include <stdint.h> // uint32_t
 #include <new>      // placement-new
 
 #include "common.h" // Heap alloc utils.
 
-#include "../common/common.h" // DM_INLINE / BX_UNUSED
+#include "../common/common.h" // DM_INLINE
 #include "../check.h"         // DM_CHECK
 
 #include "../../../3rdparty/bx/allocator.h" // bx::ReallocatorI
 
+#include "set.h"
+
 namespace dm
 {
-    template <typename Ty/*obj type*/, uint16_t MaxT>
-    struct LinkedListT
+    template <typename Ty/*arithmetic type*/, uint16_t MaxKeyT>
+    struct KeyValueMapT
     {
-        typedef LinkedListT<Ty, MaxT> This;
-
-        LinkedListT()
+        KeyValueMapT()
         {
-            m_elements[0].m_prev = 0;
-            m_elements[0].m_next = 0;
-            m_last = 0;
         }
 
-        #include "linkedlist_inline_impl.h"
+        #include "kvmap_inline_impl.h"
 
-        uint16_t count() const
+        uint16_t count()
         {
-            return m_handles.count();
+            return m_set.count();
         }
 
-        uint16_t max() const
+        uint16_t max()
         {
-            return MaxT;
+            return MaxKeyT;
         }
 
     private:
-        uint16_t m_last;
-        HandleAllocT<MaxT> m_handles;
-        Elem m_elements[MaxT];
+        SetT<MaxKeyT> m_set;
+        Ty m_values[MaxKeyT];
     };
 
-    template <typename Ty/*obj type*/>
-    struct LinkedList
+    template <typename Ty/*arithmetic type*/>
+    struct KeyValueMap
     {
-        typedef LinkedList<Ty> This;
-
         // Uninitialized state, init() needs to be called !
-        LinkedList()
+        KeyValueMap()
         {
             m_memoryBlock = NULL;
         }
 
-        LinkedList(uint16_t _max, bx::ReallocatorI* _reallocator)
+        KeyValueMap(uint16_t _max, bx::ReallocatorI* _reallocator)
         {
             init(_max, _reallocator);
         }
 
-        LinkedList(uint16_t _max, void* _mem, bx::AllocatorI* _allocator)
+        KeyValueMap(uint16_t _max, void* _mem, bx::AllocatorI* _allocator)
         {
             init(_max, _mem, _allocator);
         }
 
-        ~LinkedList()
+        ~KeyValueMap()
         {
             destroy();
         }
+
+        enum
+        {
+            SizePerElement = sizeof(Ty) + Set::SizePerElement,
+        };
 
         static inline uint32_t sizeFor(uint16_t _max)
         {
@@ -82,33 +81,29 @@ namespace dm
         // Allocates memory internally.
         void init(uint16_t _max, bx::ReallocatorI* _reallocator)
         {
+            m_max = _max;
             m_memoryBlock = BX_ALLOC(_reallocator, sizeFor(_max));
             m_reallocator = _reallocator;
             m_cleanup = true;
 
-            void* ptr = m_handles.init(_max, m_memoryBlock);
-            m_elements = (Elem*)ptr;
-
-            m_elements[0].m_prev = 0;
-            m_elements[0].m_next = 0;
-            m_last = 0;
+            void* ptr = m_memoryBlock;
+            ptr = m_set.init(_max, ptr, (bx::AllocatorI*)_reallocator);
+            m_values = (Ty*)ptr;
         }
 
         // Uses externally allocated memory.
         void* init(uint16_t _max, void* _mem, bx::AllocatorI* _allocator = NULL)
         {
+            m_max = _max;
             m_memoryBlock = _mem;
             m_allocator = _allocator;
             m_cleanup = false;
 
-            void* ptr = m_handles.init(_max, m_memoryBlock);
-            m_elements = (Elem*)ptr;
+            void* ptr = m_memoryBlock;
+            ptr = m_set.init(_max, ptr);
+            m_values = (Ty*)ptr;
 
-            m_elements[0].m_prev = 0;
-            m_elements[0].m_next = 0;
-            m_last = 0;
-
-            uint8_t* end = (uint8_t*)_mem + sizeFor(_max);
+            void* end = (void*)((uint8_t*)_mem + sizeFor(_max));
             return end;
         }
 
@@ -121,7 +116,7 @@ namespace dm
         {
             if (NULL != m_memoryBlock)
             {
-                m_handles.destroy();
+                m_set.destroy();
                 if (m_cleanup)
                 {
                     BX_FREE(m_reallocator, m_memoryBlock);
@@ -130,21 +125,16 @@ namespace dm
             }
         }
 
-        #include "linkedlist_inline_impl.h"
+        #include "kvmap_inline_impl.h"
 
-        enum
+        uint16_t count()
         {
-            SizePerElement = sizeof(Elem) + HandleAlloc16::SizePerElement,
-        };
-
-        uint16_t count() const
-        {
-            return m_handles.count();
+            return m_set.count();
         }
 
-        uint16_t max() const
+        uint16_t max()
         {
-            return m_handles.max();
+            return m_max;
         }
 
         bx::AllocatorI* allocator()
@@ -153,20 +143,20 @@ namespace dm
         }
 
     private:
-        uint16_t m_last;
-        HandleAlloc16 m_handles;
-        void* m_memoryBlock;
+        Set m_set;
+        Ty* m_values;
+        uint16_t m_max;
         union
         {
             bx::AllocatorI*   m_allocator;
             bx::ReallocatorI* m_reallocator;
         };
         bool m_cleanup;
-        Elem* m_elements;
+        void* m_memoryBlock;
     };
 
 } // namespace dm
 
-#endif // DM_LINKEDLIST_H_HEADER_GUARD
+#endif // DM_KVMAP_H_HEADER_GUARD
 
 /* vim: set sw=4 ts=4 expandtab: */

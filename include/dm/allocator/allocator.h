@@ -1,33 +1,64 @@
 /*
- * Copyright 2015-2016 Dario Manesku. All rights reserved.
+ * Copyright 2015 Dario Manesku. All rights reserved.
  * License: http://www.opensource.org/licenses/BSD-2-Clause
  */
 
-#include "../dm.h"
+#ifndef DM_ALLOCATOR_H_HEADER_GUARD
+#define DM_ALLOCATOR_H_HEADER_GUARD
 
-/// Header includes.
-#if (DM_INCL & DM_INCL_HEADER_INCLUDES)
-    #include "../misc.h"
-    #include "../allocatori.h"
-    #include "../datastructures/array.h"
-    #include "../datastructures/handlealloc.h"
-    #include "../datastructures/bitarray.h"
+// Allocator header.
+//-----
 
-    #include <dm/mutex.h> // dm::Mutex //TODO: move this to IMPL INCLUDE.
-#endif // (DM_INCL & DM_INCL_HEADER_INCLUDES)
+#include "../../../3rdparty/bx/allocator.h" //bx::ReallocatorI, BX_ALLOC/BX_FREE/BX_REALLOC
+#include "../misc.h"                        //dm::NoCopyNoAssign
 
-/// Header body.
-#if (DM_INCL & DM_INCL_HEADER_BODY)
-#   if (DM_INCL & DM_INCL_HEADER_BODY_OPT_REMOVE_HEADER_GUARD)
-#       undef DM_ALLOCATOR_H_HEADER_GUARD
-#   endif // if (DM_INCL & DM_INCL_HEADER_BODY_OPT_REMOVE_HEADER_GUARD)
-#   ifndef DM_ALLOCATOR_H_HEADER_GUARD
-#   define DM_ALLOCATOR_H_HEADER_GUARD
-namespace DM_NAMESPACE
+#include "../datastructures/bitarray.h"
+#include "../datastructures/oplist.h"
+
+#define DM_ALLOC   BX_ALLOC
+#define DM_FREE    BX_FREE
+#define DM_REALLOC BX_REALLOC
+
+namespace dm
 {
-    extern AllocatorI*      staticAlloc; // Allocated memory is released on exit.
-    extern StackAllocatorI* stackAlloc;  // Used for temporary allocations.
-    extern AllocatorI*      mainAlloc;   // Default allocator.
+    struct BX_NO_VTABLE StackAllocatorI : public bx::ReallocatorI
+    {
+        virtual void push() = 0;
+        virtual void pop() = 0;
+    };
+
+    inline void push(StackAllocatorI* _stackAllocator)
+    {
+        _stackAllocator->push();
+    }
+
+    inline void pop(StackAllocatorI* _stackAllocator)
+    {
+        _stackAllocator->pop();
+    }
+
+    struct StackAllocScope : dm::NoCopyNoAssign
+    {
+        StackAllocScope(StackAllocatorI* _stackAlloc) : m_stack(_stackAlloc)
+        {
+            push(m_stack);
+        }
+
+        ~StackAllocScope()
+        {
+            pop(m_stack);
+        }
+
+    private:
+        StackAllocatorI* m_stack;
+    };
+
+    extern bx::ReallocatorI* crtAlloc;      // C-runtime allocator.
+    extern StackAllocatorI*  crtStackAlloc; // C-runtime stack allocator.
+
+    extern bx::ReallocatorI* staticAlloc; // Allocated memory is released on exit.
+    extern StackAllocatorI*  stackAlloc;  // Used for temporary allocations.
+    extern bx::ReallocatorI* mainAlloc;   // Default allocator.
 
     bool             allocInit();
     bool             allocContains(void* _ptr);
@@ -38,32 +69,35 @@ namespace DM_NAMESPACE
     void             allocFreeStack(StackAllocatorI* _stackAlloc);
     void             allocPrintStats();
     bool             allocDestroyed();
+}
 
-} // namespace DM_NAMESPACE
-#   endif // DM_ALLOCATOR_H_HEADER_GUARD
-#endif // (DM_INCL & DM_INCL_HEADER_BODY)
+#endif // DM_ALLOCATOR_H_HEADER_GUARD
 
-/// Impl includes.
-#if (DM_INCL & DM_INCL_IMPL_INCLUDES)
-    #include "allocator_config.h"
-    #include "allocator_p.h"
+// Allocator implementation.
+//-----
 
-    #include <stdio.h>                      // fprintf
-    #include "stack.h"                      // DynamicStack, FreeStack
+#ifdef DM_ALLOCATOR_IMPL
 
-    #include <emmintrin.h>                  // __m128i
-    #if defined(__SSE4_1__)
-    #   include <smmintrin.h>               // _mm_cmpeq_epi64()
-    #endif // defined(__SSE4_1__)
+#include "allocator_config.h"
+#include "allocator_p.h"
 
-    #include <dm/misc.h>                    // DM_MEGABYTES
-    #include <dm/compiletime.h>             // dm::Log<>::value
-    #include <dm/datastructures/array.h>    // dm::Array
-#endif // (DM_INCL & DM_INCL_IMPL_INCLUDES)
+#include <stdio.h>                      // fprintf
+#include "stack.h"                      // DynamicStack, FreeStack
 
-/// Impl body.
-#if (DM_INCL & DM_INCL_IMPL_BODY)
-namespace DM_NAMESPACE
+#include <emmintrin.h>                  // __m128i
+#if defined(__SSE4_1__)
+#   include <smmintrin.h>               // _mm_cmpeq_epi64()
+#endif // defined(__SSE4_1__)
+
+#include <dm/misc.h>                    // DM_MEGABYTES
+#include <dm/compiletime.h>             // dm::Log<>::value
+#include <dm/datastructures/array.h>    // dm::Array
+#include <dm/datastructures/objarray.h> // dm::ObjArray
+
+#include <bx/thread.h>                  // bx::Mutex
+#include <bx/uint32_t.h>                // bx::uint32_cntlz
+
+namespace dm
 {
     #ifndef DM_ALLOCATOR
     #   define DM_ALLOCATOR 1
@@ -114,7 +148,7 @@ namespace DM_NAMESPACE
                 const size_t size = DM_MAX(DM_MEM_MIN_SIZE, customSize);
 
                 // Alloc.
-                m_orig = ::calloc(1, size);
+                m_orig = ::malloc(size);
 
                 DM_PRINT_MEM_STATS("Init: Allocating %u.%uMB - (0x%p)", dm::U_UMB(size), m_orig);
 
@@ -126,6 +160,9 @@ namespace DM_NAMESPACE
                 // Assign.
                 m_memory = alignedPtr;
                 m_size   = alignedSize;
+
+                // Touch every piece of memory, effectively forcing OS to add all memory pages to the process's address space.
+                memset(m_memory, 0, m_size);
 
                 // Init memory regions.
                 void* ptr = m_memory;
@@ -591,9 +628,9 @@ namespace DM_NAMESPACE
                         m_powToIdx[ii] = idx;
                     }
 
-                    uint8_t* ptr = (uint8_t*)m_allocsData;
+                    void* ptr = m_allocsData;
                     #define DM_SMALL_ALLOC_DEF(_idx, _size, _num) \
-                        ptr += m_allocs[_idx].init(Num ## _idx, ptr);
+                        ptr = m_allocs[_idx].init(Num ## _idx, ptr);
                     #include "allocator_config.h"
 
                     m_begin[0] = (uint8_t*)m_mem;
@@ -611,8 +648,8 @@ namespace DM_NAMESPACE
                     CS_CHECK(_size <= BiggestSize, "Requested size is bigger than the largest supported size!");
 
                     // Get list index.
-                    const uint32_t sizePow2 = dm::nextPowTwo(uint32_t(_size));
-                    const uint32_t pow = cnttz_u32(sizePow2);
+                    const uint32_t sizePow2 = bx::uint32_nextpow2(uint32_t(_size));
+                    const uint32_t pow = bx::uint32_cnttz(sizePow2);
                     CS_CHECK(pow < Steps, "Error! Sizes are probably not well defined.");
                     const uint8_t idx = m_powToIdx[pow];
 
@@ -720,13 +757,13 @@ namespace DM_NAMESPACE
             private:
                 void*       m_mem;
                 size_t      m_totalSize;
-                dm::LwMutex m_mutex;
+                bx::LwMutex m_mutex;
                 // Lists:
-                uint32_t        m_sizes[Count];
-                void*           m_begin[Count];
-                uint8_t         m_powToIdx[Steps];
-                dm::BitArrayExt m_allocs[Count];
-                uint8_t         m_allocsData[ListsSize];
+                uint32_t     m_sizes[Count];
+                void*        m_begin[Count];
+                uint8_t      m_powToIdx[Steps];
+                dm::BitArray m_allocs[Count];
+                uint8_t      m_allocsData[ListsSize];
 
                 #if DM_ALLOC_PRINT_STATS
                 uint32_t m_totalUsed[Count];
@@ -961,7 +998,7 @@ namespace DM_NAMESPACE
                     }
 
                     // Determine region.
-                    const uint32_t region = dm::max(0, int32_t(cnttz_u32(sizePwrTwoMB)) - SmallestRegionPwr);
+                    const uint32_t region = dm::max(0, int32_t(bx::uint32_cnttz(sizePwrTwoMB)) - SmallestRegionPwr);
 
                     // Determine subRegion.
                     uint32_t subRegion = 0;
@@ -1357,7 +1394,7 @@ namespace DM_NAMESPACE
 
                 void* alloc(size_t _size)
                 {
-                    dm::LwMutexScope lock(m_mutex);
+                    bx::LwMutexScope lock(m_mutex);
 
                     const size_t alignedSize = dm::alignSizeNext(_size, DM_NATURAL_ALIGNMENT);
                     const size_t totalSize   = alignedSize + HeaderFooterSize;
@@ -1380,7 +1417,7 @@ namespace DM_NAMESPACE
                                     const uint32_t mask  = _mm_movemask_epi8(cmp);
                                     if (mask != 0)
                                     {
-                                        const int32_t idx = ii + (cnttz_u32(mask)/4);
+                                        const int32_t idx = ii + (bx::uint32_cnttz(mask)/4);
                                         const uint32_t slotSize = m_freeSlotsSize[group][idx];
                                         void* ptr = consumeFreeSpace(group, idx, uint32_t(slotSize), uint32_t(totalSize));
 
@@ -1440,7 +1477,7 @@ namespace DM_NAMESPACE
 
                 void* realloc(void* _ptr, size_t _size)
                 {
-                    dm::LwMutexScope lock(m_mutex);
+                    bx::LwMutexScope lock(m_mutex);
 
                     void* beg = ptrToBegin(_ptr);
 
@@ -1462,7 +1499,7 @@ namespace DM_NAMESPACE
                     {
                         // Shrink.
 
-                        const size_t remainingSize = size_t(currTotalSize - reqTotalSize);
+                        const size_t remainingSize = currTotalSize - reqTotalSize;
                         if (remainingSize > MinimalSlotSize)
                         {
                             // Consume and add leftover.
@@ -1510,7 +1547,7 @@ namespace DM_NAMESPACE
                                     removeBigFreeSpace(rightBeg);
                                 }
 
-                                const size_t remainingSize = size_t(rightTotalSize - expandSize);
+                                const size_t remainingSize = rightTotalSize - expandSize;
                                 if (remainingSize > MinimalSlotSize)
                                 {
                                     // Consume and add leftover.
@@ -1536,7 +1573,7 @@ namespace DM_NAMESPACE
 
                 void free(void* _ptr)
                 {
-                    dm::LwMutexScope lock(m_mutex);
+                    bx::LwMutexScope lock(m_mutex);
 
                     void* beg = ptrToBegin(_ptr);
 
@@ -1640,7 +1677,7 @@ namespace DM_NAMESPACE
                     return (*m_end <= _ptr && _ptr < m_begin);
                 }
 
-                dm::LwMutex m_mutex;
+                bx::LwMutex m_mutex;
                 void*     m_begin;
                 uint8_t** m_end;
                 uint8_t** m_stackPtr;
@@ -1661,14 +1698,14 @@ namespace DM_NAMESPACE
                 #if DM_HEAP_ARRAY_IMPL
                     uint16_t m_freeSlotsMax[NumRegions];
 
-                    DM_ALIGN_DECL(16, uint32_t* m_freeSlotsSize[NumRegions*NumSubRegions]);
+                    BX_ALIGN_DECL_16(uint32_t* m_freeSlotsSize[NumRegions*NumSubRegions]);
                     #define DM_ALLOC_DEF(_regionIdx, _num) \
-                        DM_ALIGN_DECL(16, uint32_t m_freeSlotsSize ## _regionIdx [NumSubRegions][NumSlots ## _regionIdx]);
+                        BX_ALIGN_DECL_16(uint32_t m_freeSlotsSize ## _regionIdx [NumSubRegions][NumSlots ## _regionIdx]);
                     #include "allocator_config.h"
 
-                    DM_ALIGN_DECL(16, void** m_freeSlotsPtr[NumRegions*NumSubRegions]);
+                    BX_ALIGN_DECL_16(void** m_freeSlotsPtr[NumRegions*NumSubRegions]);
                     #define DM_ALLOC_DEF(_regionIdx, _num) \
-                        DM_ALIGN_DECL(16, void* m_freeSlotsPtr ## _regionIdx [NumSubRegions][NumSlots ## _regionIdx]);
+                        BX_ALIGN_DECL_16(void* m_freeSlotsPtr ## _regionIdx [NumSubRegions][NumSlots ## _regionIdx]);
                     #include "allocator_config.h"
                 #else
                     struct FreeSlot
@@ -1702,50 +1739,54 @@ namespace DM_NAMESPACE
         static Memory s_memory;
 
         template <typename StackTy>
-        struct StackAllocatorImpl : StackAllocatorI
+        struct StackAllocatorImpl : public dm::StackAllocatorI
         {
             virtual ~StackAllocatorImpl()
             {
             }
 
-            virtual void* realloc(void* _ptr, size_t _size, size_t /*_align*/, const char* /*_file*/, size_t /*_line*/) override
+            virtual void* alloc(size_t _size, size_t _align = DM_NATURAL_ALIGNMENT, const char* _file = NULL, uint32_t _line = 0) BX_OVERRIDE
             {
-                if (NULL == _ptr) /// Malloc.
-                {
-                    void* ptr = m_stack.alloc(_size);
-                    if (NULL == ptr)
-                    {
-                        ptr = s_memory.alloc(_size);
-                    }
+                BX_UNUSED(_align, _file, _line);
 
-                    return ptr;
-                }
-                else if (0 == _size) /// Free.
+                void* ptr = m_stack.alloc(_size);
+                if (NULL == ptr)
                 {
-                    if (!m_stack.contains(_ptr))
-                    {
-                        s_memory.free(_ptr);
-                    }
-                    return NULL;
+                    ptr = s_memory.alloc(_size);
                 }
-                else /// Realloc.
-                {
-                    void* ptr = m_stack.realloc(_ptr, _size);
-                    if (NULL == ptr)
-                    {
-                        ptr = s_memory.realloc(_ptr, _size);
-                    }
 
-                    return ptr;
+                return ptr;
+            }
+
+            virtual void free(void* _ptr, size_t _align, const char* _file, uint32_t _line) BX_OVERRIDE
+            {
+                BX_UNUSED(_align, _file, _line);
+
+                if (!m_stack.contains(_ptr))
+                {
+                    s_memory.free(_ptr);
                 }
             }
 
-            virtual void push(const char* /*_file*/, size_t /*_line*/) override
+            virtual void* realloc(void* _ptr, size_t _size, size_t _align = DM_NATURAL_ALIGNMENT, const char* _file = NULL, uint32_t _line = 0) BX_OVERRIDE
+            {
+                BX_UNUSED(_ptr, _size, _align, _file, _line);
+
+                void* ptr = m_stack.realloc(_ptr, _size);
+                if (NULL == ptr)
+                {
+                    ptr = s_memory.realloc(_ptr, _size);
+                }
+
+                return ptr;
+            }
+
+            virtual void push() BX_OVERRIDE
             {
                 m_stack.push();
             }
 
-            virtual void pop(const char* /*_file*/, size_t /*_line*/) override
+            virtual void pop() BX_OVERRIDE
             {
                 m_stack.pop();
             }
@@ -1877,129 +1918,12 @@ namespace DM_NAMESPACE
             enum { MaxFixedStacks   = 4 };
             enum { MaxDynamicStacks = 4 };
 
-            // TODO: remove!
-            template <typename Ty/*obj type*/, uint16_t MaxT>
-            struct OpListT
-            {
-                Ty* addNew()
-                {
-                    const uint16_t handle = m_handleAlloc.alloc();
-                    m_handles.push(handle);
-
-                    Ty* obj = &m_objects[handle];
-                    obj = ::new (obj) Ty();
-
-                    return obj;
-                }
-
-                uint16_t add(const Ty& _obj)
-                {
-                    const uint16_t handle = m_handleAlloc.alloc();
-                    m_handles.add(handle);
-
-                    Ty* obj = &m_objects[handle];
-                    obj = ::new (obj) Ty(_obj);
-
-                    return obj;
-                }
-
-                void removeAt(uint16_t _idx)
-                {
-                    DM_CHECK(_idx < max(), "oplistRemoveAt | %d, %d", _idx, max());
-
-                    const uint16_t handle = m_handles[_idx];
-                    m_handles.remove(_idx);
-
-                    m_handleAlloc.free(handle);
-                    m_objects[handle].~Ty();
-                }
-
-                void removeAll()
-                {
-                    for (uint16_t ii = count(); ii--; )
-                    {
-                        m_objects[ii].~Ty();
-                    }
-                    m_handleAlloc.reset();
-                    m_handles.reset();
-                }
-
-                Ty* getAt(uint16_t _idx)
-                {
-                    DM_CHECK(_idx < max(), "oplistGetAt | %d, %d", _idx, max());
-
-                    const uint16_t handle = m_handles[_idx];
-                    return &m_objects[handle];
-                }
-
-                const Ty* getAt(uint16_t _idx) const
-                {
-                    DM_CHECK(_idx < max(), "oplistGetAt const | %d, %d", _idx, max());
-
-                    const uint16_t handle = m_handles[_idx];
-                    return &m_objects[handle];
-                }
-
-                Ty& operator[](uint16_t _idx)
-                {
-                    DM_CHECK(_idx < max(), "oplist[] | %d, %d", _idx, max());
-
-                    const uint16_t handle = m_handles[_idx];
-                    return m_objects[handle];
-                }
-
-                const Ty& operator[](uint16_t _idx) const
-                {
-                    DM_CHECK(_idx < max(), "oplist[] const | %d, %d", _idx, max());
-
-                    const uint16_t handle = m_handles[_idx];
-                    return m_objects[handle];
-                }
-
-                uint16_t getHandleAt(uint16_t _idx)
-                {
-                    DM_CHECK(_idx < max(), "oplistGetHandleAt | %d, %d", _idx, max());
-
-                    return m_handles[_idx];
-                }
-
-                uint16_t getHandleOf(const Ty* _obj) const
-                {
-                    DM_CHECK(&m_objects[0] <= _obj && _obj < &m_objects[max()], "opListGetHandleOf | Object not from the list.");
-
-                    return uint16_t(_obj - m_objects);
-                }
-
-                Ty* getFromHandle(uint16_t _handle)
-                {
-                    DM_CHECK(_handle < max(), "oplistGetFromHandle | %d, %d", _handle, max());
-
-                    return &m_objects[_handle];
-                }
-
-                uint16_t count()
-                {
-                    return m_handleAlloc.count();
-                }
-
-                uint16_t max() const
-                {
-                    return MaxT;
-                }
-
-            private:
-                dm::ArrayT<uint16_t, MaxT> m_handles;
-                dm::HandleAllocT<MaxT> m_handleAlloc;
-                Ty m_objects[MaxT];
-            };
-
-            //TODO: get rid of OpListT.
-            OpListT<FixedStackAllocator,   MaxFixedStacks>   m_fixedStacks;
-            OpListT<DynamicStackAllocator, MaxDynamicStacks> m_dynamicStacks;
+            dm::OpListT<FixedStackAllocator,   MaxFixedStacks>   m_fixedStacks;
+            dm::OpListT<DynamicStackAllocator, MaxDynamicStacks> m_dynamicStacks;
         };
         static StackList s_stackList;
 
-        struct StaticAllocator : AllocatorI
+        struct StaticAllocator : public bx::ReallocatorI
         {
             StaticAllocator()
             {
@@ -2012,24 +1936,29 @@ namespace DM_NAMESPACE
             {
             }
 
-            virtual void* realloc(void* _ptr, size_t _size, size_t /*_align*/, const char* /*_file*/, size_t /*_line*/) override
+            virtual void* alloc(size_t _size, size_t _align, const char* _file, uint32_t _line) BX_OVERRIDE
             {
-                if (NULL == _ptr) /// Malloc.
-                {
-                    #if DM_ALLOC_PRINT_STATS
-                    m_allocCount++;
-                    #endif //DM_ALLOC_PRINT_STATS
+                BX_UNUSED(_align, _file, _line);
 
-                    return s_memory.staticAlloc(_size);
-                }
-                else if (0 == _size) /// Free.
-                {
-                    return NULL;
-                }
-                else /// Realloc.
-                {
-                    return s_memory.staticRealloc(_ptr, _size);
-                }
+                #if DM_ALLOC_PRINT_STATS
+                m_allocCount++;
+                #endif //DM_ALLOC_PRINT_STATS
+
+                return s_memory.staticAlloc(_size);
+            }
+
+            virtual void free(void* _ptr, size_t _align, const char* _file, uint32_t _line) BX_OVERRIDE
+            {
+                BX_UNUSED(_ptr, _align, _file, _line);
+
+                // Do nothing.
+            }
+
+            virtual void* realloc(void* _ptr, size_t _size, size_t _align, const char* _file, uint32_t _line) BX_OVERRIDE
+            {
+                BX_UNUSED(_ptr, _size, _align, _file, _line);
+
+                return s_memory.staticRealloc(_ptr, _size);
             }
 
             #if DM_ALLOC_PRINT_STATS
@@ -2045,7 +1974,7 @@ namespace DM_NAMESPACE
         };
         static StaticAllocator s_staticAllocator;
 
-        struct StackAllocator : StackAllocatorI
+        struct StackAllocator : public dm::StackAllocatorI
         {
             StackAllocator()
             {
@@ -2059,40 +1988,44 @@ namespace DM_NAMESPACE
             {
             }
 
-            virtual void* realloc(void* _ptr, size_t _size, size_t /*_align*/, const char* /*_file*/, size_t /*_line*/) override
+            virtual void* alloc(size_t _size, size_t _align, const char* _file, uint32_t _line) BX_OVERRIDE
             {
-                if (NULL == _ptr) /// Malloc.
-                {
-                    #if DM_ALLOC_PRINT_STATS
-                    m_alloc++;
-                    #endif //DM_ALLOC_PRINT_STATS
+                BX_UNUSED(_align, _file, _line);
 
-                    return s_memory.stackAlloc(_size);
-                }
-                else if (0 == _size) /// Free.
-                {
-                    if (!s_memory.fromStackRegion(_ptr))
-                    {
-                        s_memory.free(_ptr);
-                    }
-                    return NULL;
-                }
-                else /// Realloc.
-                {
-                    #if DM_ALLOC_PRINT_STATS
-                    m_realloc++;
-                    #endif //DM_ALLOC_PRINT_STATS
+                #if DM_ALLOC_PRINT_STATS
+                m_alloc++;
+                #endif //DM_ALLOC_PRINT_STATS
 
-                    return s_memory.stackRealloc(_ptr, _size);
+                return s_memory.stackAlloc(_size);
+            }
+
+            virtual void free(void* _ptr, size_t _align, const char* _file, uint32_t _line) BX_OVERRIDE
+            {
+                BX_UNUSED(_align, _file, _line);
+
+                if (!s_memory.fromStackRegion(_ptr))
+                {
+                    s_memory.free(_ptr);
                 }
             }
 
-            virtual void push(const char* /*_file*/, size_t /*_line*/) override
+            virtual void* realloc(void* _ptr, size_t _size, size_t _align, const char* _file, uint32_t _line) BX_OVERRIDE
+            {
+                BX_UNUSED(_align, _file, _line);
+
+                #if DM_ALLOC_PRINT_STATS
+                m_realloc++;
+                #endif //DM_ALLOC_PRINT_STATS
+
+                return s_memory.stackRealloc(_ptr, _size);
+            }
+
+            virtual void push() BX_OVERRIDE
             {
                 s_memory.stackPush();
             }
 
-            virtual void pop(const char* /*_file*/, size_t /*_line*/) override
+            virtual void pop() BX_OVERRIDE
             {
                 s_memory.stackPop();
             }
@@ -2118,33 +2051,37 @@ namespace DM_NAMESPACE
         };
         static StackAllocator s_stackAllocator;
 
-        struct MainAllocator : public AllocatorI
+        struct MainAllocator : public bx::ReallocatorI
         {
             virtual ~MainAllocator()
             {
             }
 
-            virtual void* realloc(void* _ptr, size_t _size, size_t /*_align*/, const char* /*_file*/, size_t /*_line*/) override
+            virtual void* alloc(size_t _size, size_t _align, const char* _file, uint32_t _line) BX_OVERRIDE
             {
-                if (NULL == _ptr) /// Malloc.
-                {
-                    return s_memory.alloc(_size);
-                }
-                else if (0 == _size) /// Free.
-                {
-                    s_memory.free(_ptr);
-                    return NULL;
-                }
-                else /// Realloc.
-                {
-                    return s_memory.realloc(_ptr, _size);
-                }
+                BX_UNUSED(_align, _file, _line);
+
+                return s_memory.alloc(_size);
+            }
+
+            virtual void free(void* _ptr, size_t _align, const char* _file, uint32_t _line) BX_OVERRIDE
+            {
+                BX_UNUSED(_align, _file, _line);
+
+                s_memory.free(_ptr);
+            }
+
+            virtual void* realloc(void* _ptr, size_t _size, size_t _align, const char* _file, uint32_t _line) BX_OVERRIDE
+            {
+                BX_UNUSED(_align, _file, _line);
+
+                return s_memory.realloc(_ptr, _size);
             }
         };
         static MainAllocator s_mainAllocator;
 
         #if 0 // Debug only.
-            struct StackAllocatorEmul : StackAllocatorI
+            struct StackAllocatorEmul : public StackAllocatorI
             {
                 StackAllocatorEmul()
                 {
@@ -2171,43 +2108,48 @@ namespace DM_NAMESPACE
                     m_pointers.destroy();
                 }
 
-                virtual void* realloc(void* _ptr, size_t _size, size_t /*_align*/, const char* /*_file*/, size_t /*_line*/) override
+                virtual void* alloc(size_t _size, size_t _align, const char* _file, uint32_t _line) BX_OVERRIDE
                 {
-                    if (NULL == _ptr) /// Malloc.
-                    {
-                        #if DM_ALLOC_PRINT_STATS
-                        m_alloc++;
-                        #endif //DM_ALLOC_PRINT_STATS
+                    BX_UNUSED(_align, _file, _line);
 
-                        void* ptr = s_memory.alloc(_size);
-                        m_pointers[m_stackFrame].add(ptr);
+                    #if DM_ALLOC_PRINT_STATS
+                    m_alloc++;
+                    #endif //DM_ALLOC_PRINT_STATS
 
-                        return ptr;
-                    }
-                    else if (0 == _size) /// Free.
-                    {
-                        return NULL;
-                    }
-                    else /// Realloc.
-                    {
-                        #if DM_ALLOC_PRINT_STATS
-                        m_realloc++;
-                        #endif //DM_ALLOC_PRINT_STATS
+                    void* ptr = s_memory.alloc(_size);
+                    m_pointers[m_stackFrame].add(ptr);
 
-                        //TODO: in debug mode, check that the pointer is present in m_pointers[m_stackFrame].
-
-                        return s_memory.realloc(_ptr, _size);
-                    }
+                    return ptr;
                 }
 
-                virtual void push(const char* /*_file*/, size_t /*_line*/) override
+                virtual void free(void* _ptr, size_t _align, const char* _file, uint32_t _line) BX_OVERRIDE
+                {
+                    BX_UNUSED(_ptr, _align, _file, _line);
+
+                    // do nothing.
+                }
+
+                virtual void* realloc(void* _ptr, size_t _size, size_t _align, const char* _file, uint32_t _line) BX_OVERRIDE
+                {
+                    BX_UNUSED(_align, _file, _line);
+
+                    #if DM_ALLOC_PRINT_STATS
+                    m_realloc++;
+                    #endif //DM_ALLOC_PRINT_STATS
+
+                    //TODO: in debug mode, check that the pointer is present in m_pointers[m_stackFrame].
+
+                    return s_memory.realloc(_ptr, _size);
+                }
+
+                virtual void push() BX_OVERRIDE
                 {
                     //TODO: debug print/count.
 
                     m_stackFrame++;
                 }
 
-                virtual void pop(const char* /*_file*/, size_t /*_line*/) override
+                virtual void pop() BX_OVERRIDE
                 {
                     PtrArray& ptrArray = m_pointers[m_stackFrame];
                     for (uint32_t ii = ptrArray.count(); ii--; )
@@ -2254,6 +2196,169 @@ namespace DM_NAMESPACE
 
     #endif // !DM_ALLOCATOR
 
+    struct CrtAllocator : public bx::ReallocatorI
+    {
+        virtual ~CrtAllocator()
+        {
+        }
+
+        virtual void* alloc(size_t _size, size_t _align, const char* _file, uint32_t _line) BX_OVERRIDE
+        {
+            BX_UNUSED(_align, _file, _line);
+
+            return ::malloc(_size);
+        }
+
+        virtual void free(void* _ptr, size_t _align, const char* _file, uint32_t _line) BX_OVERRIDE
+        {
+            BX_UNUSED(_align, _file, _line);
+
+            #if DM_ALLOCATOR
+                if (s_memory.contains(_ptr))
+                {
+                    s_memory.free(_ptr);
+                }
+                else
+                {
+                    ::free(_ptr);
+                }
+            #else
+                ::free(_ptr);
+            #endif // DM_ALLOCATOR
+        }
+
+        virtual void* realloc(void* _ptr, size_t _size, size_t _align, const char* _file, uint32_t _line) BX_OVERRIDE
+        {
+            BX_UNUSED(_align, _file, _line);
+
+            #if DM_ALLOCATOR
+                if (s_memory.contains(_ptr))
+                {
+                    return s_memory.realloc(_ptr, _size);
+                }
+                else
+                {
+                    return ::realloc(_ptr, _size);
+                }
+            #else
+                return ::realloc(_ptr, _size);
+            #endif // DM_ALLOCATOR
+        }
+    };
+    static CrtAllocator s_crtAllocator;
+
+    struct CrtStackAllocator : public StackAllocatorI
+    {
+        CrtStackAllocator()
+        {
+            #if DM_ALLOC_PRINT_STATS
+            m_alloc   = 0;
+            m_realloc = 0;
+            #endif //DM_ALLOC_PRINT_STATS
+
+            m_stackFrame = 0;
+            m_pointers.init(MaxStackFramesEstimate, &s_crtAllocator);
+            for (uint32_t ii = MaxStackFramesEstimate; ii--; )
+            {
+                m_pointers[ii].init(MaxPointersPerFrameEstiamte, &s_crtAllocator);
+            }
+        }
+
+        virtual ~CrtStackAllocator()
+        {
+            for (uint32_t ii = m_pointers.count(); ii--; )
+            {
+                m_pointers[ii].destroy();
+            }
+
+            m_pointers.destroy();
+        }
+
+        virtual void* alloc(size_t _size, size_t _align, const char* _file, uint32_t _line) BX_OVERRIDE
+        {
+            BX_UNUSED(_align, _file, _line);
+
+            #if DM_ALLOC_PRINT_STATS
+            m_alloc++;
+            #endif //DM_ALLOC_PRINT_STATS
+
+            void* ptr = ::malloc(_size);
+            m_pointers[m_stackFrame].add(ptr);
+
+            return ptr;
+        }
+
+        virtual void free(void* _ptr, size_t _align, const char* _file, uint32_t _line) BX_OVERRIDE
+        {
+            BX_UNUSED(_ptr, _align, _file, _line);
+
+            // do nothing.
+        }
+
+        virtual void* realloc(void* _ptr, size_t _size, size_t _align, const char* _file, uint32_t _line) BX_OVERRIDE
+        {
+            BX_UNUSED(_align, _file, _line);
+
+            #if DM_ALLOC_PRINT_STATS
+            m_realloc++;
+            #endif //DM_ALLOC_PRINT_STATS
+
+            //TODO: in debug mode, check that the pointer is present in m_pointers[m_stackFrame].
+
+            return ::realloc(_ptr, _size);
+        }
+
+        virtual void push() BX_OVERRIDE
+        {
+            //TODO: debug print/count.
+
+            m_stackFrame++;
+        }
+
+        virtual void pop() BX_OVERRIDE
+        {
+            PtrArray& ptrArray = m_pointers[m_stackFrame];
+            for (uint32_t ii = ptrArray.count(); ii--; )
+            {
+                ::free(ptrArray[ii]);
+            }
+            ptrArray.reset();
+
+            m_stackFrame--;
+        }
+
+        #if DM_ALLOC_PRINT_STATS
+        void printStats()
+        {
+            fprintf(stderr
+                  , "Crt stack allocator:\n"
+                    "\t%4d (alloc)\n"
+                    "\t%4d (realloc)\n\n"
+                  , m_alloc
+                  , m_realloc
+                  );
+        }
+        #endif //DM_ALLOC_PRINT_STATS
+
+    private:
+        enum
+        {
+            MaxStackFramesEstimate      = 16,
+            MaxPointersPerFrameEstiamte = 128,
+        };
+
+        typedef dm::Array<void*> PtrArray;
+
+        #if DM_ALLOC_PRINT_STATS
+        uint32_t m_alloc;
+        uint32_t m_realloc;
+        #endif //DM_ALLOC_PRINT_STATS
+
+        uint32_t m_stackFrame;
+        dm::ObjArray<PtrArray> m_pointers;
+    };
+    static CrtStackAllocator s_crtStackAllocator;
+
     bool allocInit()
     {
         #if DM_ALLOCATOR
@@ -2268,7 +2373,7 @@ namespace DM_NAMESPACE
         #if DM_ALLOCATOR
             return s_memory.contains(_ptr);
         #else
-            DM_UNUSED(_ptr);
+            BX_UNUSED(_ptr);
             return true;
         #endif //DM_ALLOCATOR
     }
@@ -2278,7 +2383,7 @@ namespace DM_NAMESPACE
         #if DM_ALLOCATOR
             return s_memory.getSize(_ptr);
         #else
-            DM_UNUSED(_ptr);
+            BX_UNUSED(_ptr);
             return 0;
         #endif //DM_ALLOCATOR
     }
@@ -2312,16 +2417,13 @@ namespace DM_NAMESPACE
         #endif //DM_ALLOCATOR
     }
 
-    extern CrtAllocator      g_crtAllocator;
-    extern CrtStackAllocator g_crtStackAllocator;
-
     StackAllocatorI* allocCreateStack(size_t _size)
     {
         #if DM_ALLOCATOR
             return s_stackList.createFixed(_size);
         #else
-            DM_UNUSED(_size);
-            return &g_crtStackAllocator;
+            BX_UNUSED(_size);
+            return &s_crtStackAllocator;
         #endif //DM_ALLOCATOR
     }
 
@@ -2330,9 +2432,8 @@ namespace DM_NAMESPACE
         #if DM_ALLOCATOR
             return s_stackList.createSplit(_awayFromStackPtr, _preferedSize);
         #else
-            DM_UNUSED(_awayFromStackPtr);
-            DM_UNUSED(_preferedSize);
-            return &g_crtStackAllocator;
+            BX_UNUSED(_awayFromStackPtr, _preferedSize);
+            return &s_crtStackAllocator;
         #endif //DM_ALLOCATOR
     }
 
@@ -2341,21 +2442,25 @@ namespace DM_NAMESPACE
         #if DM_ALLOCATOR
             s_stackList.free(_stackAlloc);
         #else
-            DM_UNUSED(_stackAlloc);
+            BX_UNUSED(_stackAlloc);
         #endif //DM_ALLOCATOR
     }
 
+    bx::ReallocatorI* crtAlloc      = &s_crtAllocator;
+    StackAllocatorI*  crtStackAlloc = &s_crtStackAllocator;
+
     #if DM_ALLOCATOR
-        AllocatorI*      staticAlloc = &s_staticAllocator;
-        StackAllocatorI* stackAlloc  = &s_stackAllocator;
-        AllocatorI*      mainAlloc   = &s_mainAllocator;
+        bx::ReallocatorI* staticAlloc = &s_staticAllocator;
+        StackAllocatorI*  stackAlloc  = &s_stackAllocator;
+        bx::ReallocatorI* mainAlloc   = &s_mainAllocator;
     #else
-        AllocatorI*      staticAlloc = &g_crtAllocator;
-        StackAllocatorI* stackAlloc  = &g_crtStackAllocator;
-        AllocatorI*      mainAlloc   = &g_crtAllocator;
+        bx::ReallocatorI* staticAlloc = &s_crtAllocator;
+        StackAllocatorI*  stackAlloc  = &s_crtStackAllocator;
+        bx::ReallocatorI* mainAlloc   = &s_crtAllocator;
     #endif //DM_ALLOCATOR
 
-} // namespace DM_NAMESPACE
-#endif // (DM_INCL & DM_INCL_IMPL_BODY)
+} //namespace dm
+
+#endif //DM_ALLOCATOR_IMPL
 
 /* vim: set sw=4 ts=4 expandtab: */

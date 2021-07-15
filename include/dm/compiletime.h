@@ -3,23 +3,17 @@
  * License: http://www.opensource.org/licenses/BSD-2-Clause
  */
 
-#include "dm.h"
+#ifndef DM_COMPILETIME_H_HEADER_GUARD
+#define DM_COMPILETIME_H_HEADER_GUARD
 
-/// Header includes.
-#if (DM_INCL & DM_INCL_HEADER_INCLUDES)
-#   include <stdint.h>
-#   include <limits.h>  // CHAR_MAX
-#   include "platform.h" // DM_CPP11
-#endif // (DM_INCL & DM_INCL_HEADER_INCLUDES)
+#include <stdint.h>
+#include <limits.h>  // CHAR_MAX
 
-/// Header body.
-#if (DM_INCL & DM_INCL_HEADER_BODY)
-#   if (DM_INCL & DM_INCL_HEADER_BODY_OPT_REMOVE_HEADER_GUARD)
-#       undef DM_COMPILETIME_H_HEADER_GUARD
-#   endif // if (DM_INCL & DM_INCL_HEADER_BODY_OPT_REMOVE_HEADER_GUARD)
-#   ifndef DM_COMPILETIME_H_HEADER_GUARD
-#   define DM_COMPILETIME_H_HEADER_GUARD
-namespace DM_NAMESPACE
+#ifndef DM_CPP11
+#   define DM_CPP11 (__cplusplus >= 201103L)
+#endif
+
+namespace dm
 {
     /// Static assert.
     /// To be used as a statement inside a scope.
@@ -46,13 +40,6 @@ namespace DM_NAMESPACE
         enum { value = Base * Pow<Base, N-1>::value };
     };
     template <uint8_t Base> struct Pow<Base, 0> { enum { value = 1 }; };
-
-    /// Next Pow Two.
-    template <uint32_t Val>
-    struct NextPowTwo
-    {
-        enum { value = 1 << (dm::Log<2, Val-1>::value + 1) };
-    };
 
     /// Type info.
     /// Usage: uint8_t val = TyInfo<uint8_t>::Max();
@@ -294,8 +281,8 @@ namespace DM_NAMESPACE
     ///     struct Foo { };
     #define DM_ENABLE_IF(_templateParam, _testFunc) typename dm::enable_if<dm::_testFunc<_templateParam>::value == true, void>::type* = NULL
 
-} // namespace DM_NAMESPACE
-#   endif // DM_COMPILETIME_H_HEADER_GUARD
-#endif // (DM_INCL & DM_INCL_HEADER_BODY)
+} // namespace dm
+
+#endif // DM_COMPILETIME_H_HEADER_GUARD
 
 /* vim: set sw=4 ts=4 expandtab: */

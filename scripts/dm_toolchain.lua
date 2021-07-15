@@ -179,7 +179,7 @@ function dm_toolchain(_buildDir, _projDir, _libDir, _bxDir)
         end
 
         if "linux-gcc" == _OPTIONS["gcc"] then
-            location (path.join(_projDir, _ACTION .. "-linux-gcc"))
+            location (path.join(_projDir, _ACTION .. "-linux"))
         end
 
         if "linux-clang" == _OPTIONS["gcc"] then
@@ -354,16 +354,15 @@ function dm_toolchain(_buildDir, _projDir, _libDir, _bxDir)
         {
             "WIN32",
             "_WIN32",
+            "_HAS_EXCEPTIONS=0",
             "_SCL_SECURE=0",
             "_SCL_SECURE_NO_WARNINGS",
             "_CRT_SECURE_NO_WARNINGS",
             "_CRT_SECURE_NO_DEPRECATE",
-            --"_HAS_EXCEPTIONS=0", -- This is perhaps causing "error C3861: '__uncaught_exception': identifier not found".
         }
         buildoptions
         {
-            "/Ob2",  -- The Inline Function Expansion
-            "/EHsc", -- Std explicitely wants exception handling :|.
+            "/Ob2",    -- The Inline Function Expansion
         }
         linkoptions
         {
@@ -524,7 +523,7 @@ function dm_toolchain(_buildDir, _projDir, _libDir, _bxDir)
         }
         buildoptions { "-m64" }
 
-    configuration { "*-gcc", "*-clang" }
+    configuration { "linux-gcc and not linux-clang" }
         buildoptions
         {
             "-mfpmath=sse", -- force SSE to get 32-bit and 64-bit builds deterministic.
@@ -1040,6 +1039,8 @@ function strip()
         {
         -- Wall
             "-Waddress"
+        .. " -Wc++11-compat"
+        .. " -Wc++11-extenions"
         .. " -Wchar-subscripts"
         .. " -Wcomment"
         .. " -Wformat"
@@ -1054,6 +1055,7 @@ function strip()
         .. " -Wstrict-overflow=1"
         .. " -Wswitch"
         .. " -Wtrigraphs"
+        .. " -Wuninitialized"
         .. " -Wunknown-pragmas"
         .. " -Wunused-function"
         .. " -Wunused-label"
@@ -1069,7 +1071,7 @@ function strip()
         .. " -Wuninitialized"
         .. " -Wunused-parameter"
         -- Other
-        --.. " -Wcast-qual"
+        .. " -Wcast-qual"
         .. " -Wdisabled-optimization"
         .. " -Wdiv-by-zero"
         .. " -Wendif-labels"
@@ -1089,7 +1091,7 @@ function strip()
         .. " -Wsign-compare"
         .. " -Wstrict-aliasing"
         .. " -Wstrict-aliasing=2"
-        --.. " -Wshadow"
+        .. " -Wshadow"
         .. " -Wwrite-strings"
         .. " -Werror=declaration-after-statement"
         .. " -Werror=implicit-function-declaration"
@@ -1105,7 +1107,7 @@ function strip()
         .. " -Wno-inline"
         }
 
-    configuration { "*-gcc" }
+    configuration { "linux-* or mingw-*" }
         buildoptions
         {
             -- Wall
@@ -1115,11 +1117,14 @@ function strip()
             .. " -Wunused-but-set-parameter"
         }
 
-    configuration { "*-clang or osx or xcode4" }
+    configuration { "osx or xcode4" }
         buildoptions
         {
+            -- Wall
+                "-Wuninitialized"
             -- Wextra
-            "-Wconsumed"
+            .. " -Wconsumed"
+            .. " -Wunused-parameter"
         }
 
     configuration {} -- reset configuration

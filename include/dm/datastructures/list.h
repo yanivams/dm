@@ -3,34 +3,28 @@
  * License: http://www.opensource.org/licenses/BSD-2-Clause
  */
 
-#ifndef DM_LINKEDLIST_H_HEADER_GUARD
-#define DM_LINKEDLIST_H_HEADER_GUARD
+#ifndef DM_LIST_H_HEADER_GUARD
+#define DM_LIST_H_HEADER_GUARD
 
 #include <stdint.h> // uint32_t
 #include <new>      // placement-new
 
 #include "common.h" // Heap alloc utils.
 
-#include "../common/common.h" // DM_INLINE / BX_UNUSED
+#include "../common/common.h" // DM_INLINE
 #include "../check.h"         // DM_CHECK
 
 #include "../../../3rdparty/bx/allocator.h" // bx::ReallocatorI
 
+#include "handlealloc.h"
+
 namespace dm
 {
-    template <typename Ty/*obj type*/, uint16_t MaxT>
-    struct LinkedListT
+    template <typename ObjTy, uint32_t MaxT>
+    struct ListT
     {
-        typedef LinkedListT<Ty, MaxT> This;
-
-        LinkedListT()
-        {
-            m_elements[0].m_prev = 0;
-            m_elements[0].m_next = 0;
-            m_last = 0;
-        }
-
-        #include "linkedlist_inline_impl.h"
+        typedef ListT<ObjTy,MaxT> This;
+        #include "list_inline_impl.h"
 
         uint16_t count() const
         {
@@ -43,36 +37,38 @@ namespace dm
         }
 
     private:
-        uint16_t m_last;
         HandleAllocT<MaxT> m_handles;
-        Elem m_elements[MaxT];
+        ObjTy m_elements[MaxT];
     };
 
-    template <typename Ty/*obj type*/>
-    struct LinkedList
+    template <typename ObjTy/*obj type*/>
+    struct List
     {
-        typedef LinkedList<Ty> This;
-
         // Uninitialized state, init() needs to be called !
-        LinkedList()
+        List()
         {
             m_memoryBlock = NULL;
         }
 
-        LinkedList(uint16_t _max, bx::ReallocatorI* _reallocator)
+        List(uint16_t _max, bx::ReallocatorI* _reallocator)
         {
             init(_max, _reallocator);
         }
 
-        LinkedList(uint16_t _max, void* _mem, bx::AllocatorI* _allocator)
+        List(uint16_t _max, void* _mem, bx::AllocatorI* _allocator)
         {
             init(_max, _mem, _allocator);
         }
 
-        ~LinkedList()
+        ~List()
         {
             destroy();
         }
+
+        enum
+        {
+            SizePerElement = sizeof(ObjTy) + HandleAlloc16::SizePerElement,
+        };
 
         static inline uint32_t sizeFor(uint16_t _max)
         {
@@ -87,11 +83,7 @@ namespace dm
             m_cleanup = true;
 
             void* ptr = m_handles.init(_max, m_memoryBlock);
-            m_elements = (Elem*)ptr;
-
-            m_elements[0].m_prev = 0;
-            m_elements[0].m_next = 0;
-            m_last = 0;
+            m_elements = (ObjTy*)ptr;
         }
 
         // Uses externally allocated memory.
@@ -102,13 +94,9 @@ namespace dm
             m_cleanup = false;
 
             void* ptr = m_handles.init(_max, m_memoryBlock);
-            m_elements = (Elem*)ptr;
+            m_elements = (ObjTy*)ptr;
 
-            m_elements[0].m_prev = 0;
-            m_elements[0].m_next = 0;
-            m_last = 0;
-
-            uint8_t* end = (uint8_t*)_mem + sizeFor(_max);
+            void* end = (void*)((uint8_t*)_mem + sizeFor(_max));
             return end;
         }
 
@@ -130,12 +118,8 @@ namespace dm
             }
         }
 
-        #include "linkedlist_inline_impl.h"
-
-        enum
-        {
-            SizePerElement = sizeof(Elem) + HandleAlloc16::SizePerElement,
-        };
+        typedef List<ObjTy> This;
+        #include "list_inline_impl.h"
 
         uint16_t count() const
         {
@@ -153,8 +137,8 @@ namespace dm
         }
 
     private:
-        uint16_t m_last;
         HandleAlloc16 m_handles;
+        ObjTy* m_elements;
         void* m_memoryBlock;
         union
         {
@@ -162,11 +146,10 @@ namespace dm
             bx::ReallocatorI* m_reallocator;
         };
         bool m_cleanup;
-        Elem* m_elements;
     };
 
 } // namespace dm
 
-#endif // DM_LINKEDLIST_H_HEADER_GUARD
+#endif // DM_LIST_H_HEADER_GUARD
 
 /* vim: set sw=4 ts=4 expandtab: */
